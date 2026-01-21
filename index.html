@@ -82,7 +82,6 @@ canvas{background:#020617;border:1px solid #1f2937;border-radius:8px}
 
 <div class="popup" id="popup"><div id="popupText"></div><button onclick="popup.style.display='none'">Close</button></div>
 
-<!-- Stats -->
 <div class="floating" style="top:80px">
 <b>📊 Strategy Stats</b><br>
 Trades: <span id="st_trades">0</span><br>
@@ -91,13 +90,11 @@ Loss: <span id="st_loss">0</span><br>
 Win Rate: <span id="st_win">0%</span>
 </div>
 
-<!-- Trade history -->
 <div class="floating" style="bottom:10px;left:10px">
 <b>📘 Trade Journal</b>
 <div id="journal" style="max-height:140px;overflow:auto"></div>
 </div>
 
-<!-- Equity curve -->
 <div class="floating" style="bottom:10px;right:10px">
 <b>📈 P/L Curve</b><br>
 <canvas id="curve" width="240" height="120"></canvas>
@@ -105,10 +102,10 @@ Win Rate: <span id="st_win">0%</span>
 
 <script>
 const WORKER="https://red-tooth-e4f7.lovelyideas-in.workers.dev";
-const API=s=>`${WORKER}?symbol=${s}`;
+const API=s=>`${WORKER}/candles?symbol=${s}`; // <-- FIXED for GitHub pages
 
-const TELEGRAM_BOT="YOUR_BOT_TOKEN";
-const TELEGRAM_CHAT="YOUR_CHAT_ID";
+const TELEGRAM_BOT="8168507195:AAHXFWjfWqDZ4A4ZWnBIIsoc9wu2yp6uGmU";
+const TELEGRAM_CHAT="1652821502";
 
 let BASE=["SBIN","IDEA","RVNL","TCS"];
 let user=JSON.parse(localStorage.getItem("stocks")||"[]");
@@ -125,12 +122,11 @@ function logTrade(stock,type,entry,exit){
  localStorage.setItem("journal",JSON.stringify(journal));
  equity.push((equity.at(-1)||0)+pnl);
  localStorage.setItem("equity",JSON.stringify(equity));
- renderJournal(); renderCurve();
- updateStats();
+ renderJournal(); renderCurve(); updateStats();
 }
 
 function renderJournal(){
- journalDiv.innerHTML=journal.slice(-10).reverse().map(t=>
+ journal.innerHTML = journal.slice(-10).reverse().map(t =>
   `<div>${t.time} ${t.stock} ${t.type} P/L: ${t.pnl.toFixed(2)}</div>`
  ).join("");
 }
@@ -171,12 +167,23 @@ function signal(e9,e21,r){return e9>e21&&r>60?"BUY":e9<e21&&r<40?"SELL":"HOLD"}
 function parse(j){
  try{
   let r=j.chart.result[0],q=r.indicators.quote[0];
-  return r.timestamp.map((t,i)=>({date:new Date(t*1000).toISOString().slice(0,10),
-  open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i],volume:q.volume?.[i]||0})).filter(x=>x.close);
+  return r.timestamp.map((t,i)=>({
+    date:new Date(t*1000).toISOString().slice(0,10),
+    open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i],volume:q.volume?.[i]||0
+  })).filter(x=>x.close);
  }catch{return []}
 }
 
-async function load(s){ try{DB[s]=parse(await (await fetch(API(s))).json())}catch{DB[s]=[]} }
+async function load(s){
+ try{
+  const res = await fetch(API(s));
+  const data = await res.json();
+  DB[s] = parse(data);
+ }catch(e){
+  console.error("Fetch failed", s, e);
+  DB[s]=[];
+ }
+}
 
 function render(){
  time.textContent=new Date().toLocaleTimeString();
@@ -195,10 +202,9 @@ function render(){
  }
 
  tbody.innerHTML=rows.map(r=>{
-  if(r.sig!=="HOLD"&&last[r.s]!==r.sig){
+  if(r.sig!=="HOLD" && last[r.s]!==r.sig){
    last[r.s]=r.sig;
    sendTelegram(`/${r.sig.toLowerCase()} ${r.s} @${r.entry.toFixed(2)}`);
-   // simulate exit at target for backtest
    logTrade(r.s,r.sig,r.entry,r.tgt);
   }
   return `<tr>
@@ -210,11 +216,16 @@ function render(){
 <td>${r.chg.toFixed(2)}%</td>
 <td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
 <td class="${r.sig==="BUY"?"green":r.sig==="SELL"?"red":"orange"}">${r.sig}</td>
-</tr>`
+</tr>`;
  }).join("");
 }
 
-async function init(){for(let s of STOCKS)await load(s);render();setInterval(render,60000);renderJournal();renderCurve();updateStats();}
+async function init(){
+ for(let s of STOCKS) await load(s);
+ render();
+ setInterval(render,60000);
+ renderJournal(); renderCurve(); updateStats();
+}
 init();
 </script>
 </body>
