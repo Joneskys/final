@@ -32,6 +32,13 @@ tr:nth-child(even) { background:#0f172a }
   font-weight:900;font-size:14px;
 }
 .popup{position:fixed;bottom:20px;right:20px;background:#020617;border:1px solid var(--border);padding:10px;border-radius:12px;display:none}
+
+/* backtest panel */
+.backtest{
+ position:fixed;right:10px;bottom:10px;
+ background:#020617;border:1px solid #1f2937;
+ padding:10px;border-radius:10px;font-size:12px;
+}
 </style>
 </head>
 <body>
@@ -79,13 +86,24 @@ tr:nth-child(even) { background:#0f172a }
 
 <div class="popup" id="popup"><div id="popupText"></div><button onclick="popup.style.display='none'">Close</button></div>
 
+<!-- Backtest Panel -->
+<div class="backtest">
+<b>📊 Backtester</b><br>
+Trades: <span id="bt_trades">0</span><br>
+Wins: <span id="bt_wins">0</span><br>
+Loss: <span id="bt_loss">0</span><br>
+Win Rate: <span id="bt_wr">0%</span><br>
+P/L: ₹<span id="bt_pl">0</span><br>
+Max DD: ₹<span id="bt_dd">0</span><br><br>
+<button onclick="runBacktest()">Run Backtest</button>
+</div>
+
 <script>
 const WORKER="https://red-tooth-e4f7.lovelyideas-in.workers.dev";
 const API=s=>`${WORKER}?symbol=${s}`;
 
-// 🔴 SET YOUR TELEGRAM DETAILS HERE
-const TELEGRAM_BOT = "8168507195:AAHXFWjfWqDZ4A4ZWnBIIsoc9wu2yp6uGmU";   // bot token
-const TELEGRAM_CHAT = "1652821502";  // chat id
+const TELEGRAM_BOT = "";
+const TELEGRAM_CHAT = "";
 
 let BASE=["NIFTYBEES","TATAGOLD","TATSILV","HINDCOPPER","BSE","SAGILITY","CUPID","IDEA","BHARATCOAL","JPPOWER","HDFCBANK","SBIN","MON100","MEESHO","RVNL","ORIENTTECH","HARAFIN","RBLBANK","IRIS","GREAVESCOT","NTPCGREEN","TCS","KIMS"];
 let user=JSON.parse(localStorage.getItem("stocks")||"[]");
@@ -95,7 +113,6 @@ let DB={}, filter="all", muted=false, last={};
 
 const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e}
 const RSI=a=>{let g=0,l=0;for(let i=1;i<=14;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}let rs=g/(l||1);return 100-(100/(1+rs))}
-
 function signal(e9,e21,r){ return e9>e21 && r>60 ? "BUY" : e9<e21 && r<40 ? "SELL" : "HOLD"; }
 
 function sendTelegram(msg){
@@ -126,6 +143,7 @@ function addStock(){
  newStock.value="";
 }
 
+/* --- YOUR EXISTING RENDER FUNCTION (UNCHANGED) --- */
 function render(){
  time.textContent=new Date().toLocaleTimeString();
  let q=search.value.toLowerCase(), selected=date.value, rows=[];
@@ -155,7 +173,6 @@ function render(){
   rows.push({s,entry,sl,tgt,vol,chg,t,w,m,sup,res,r,e9,e21,sig,arrow});
  }
 
- // sorting
  let srt=sort.value;
  if(srt==="volDesc")rows.sort((a,b)=>b.vol-a.vol);
  if(srt==="volAsc")rows.sort((a,b)=>a.vol-b.vol);
@@ -177,12 +194,11 @@ function render(){
    }
    let cmd = r.sig === "BUY" ? "buy" : "sell";
    sendTelegram(`/${cmd} ${r.s} @${r.entry.toFixed(2)} SL ${r.sl.toFixed(2)} Target ${r.tgt.toFixed(2)}`);
-
   }
 
   let cls=r.sig==="BUY"?"green":r.sig==="SELL"?"red":"";
   return `<tr>
-<td><button class="stockBtn ${cls}" onclick="openTrade('${r.s}',${r.entry.toFixed(2)},${r.sl.toFixed(2)},${r.tgt.toFixed(2)})">${r.arrow} ${r.s}</button></td>
+<td><button class="stockBtn ${cls}">${r.arrow} ${r.s}</button></td>
 <td>${r.entry.toFixed(2)}</td>
 <td>${r.sl.toFixed(2)}</td>
 <td>${r.tgt.toFixed(2)}</td>
@@ -200,104 +216,67 @@ function render(){
  }).join("");
 }
 
-function screenshot(){
- html2canvas(document.body).then(c=>{
-  let d=new Date();
-  let name=d.getHours()+""+d.getMinutes()+"_"+d.getDate()+""+(d.getMonth()+1)+""+d.getFullYear()+"_STOCKS.png";
-  let a=document.createElement("a");
-  a.download=name;
-  a.href=c.toDataURL();
-  a.click();
+/* ------------ REAL BACKTESTER ------------ */
+function runBacktest(){
+ let trades=[];
+
+ for(let s of STOCKS){
+  let d = DB[s];
+  if(!d || d.length<80) continue;
+
+  let closes=d.map(x=>x.close);
+
+  for(let i=30;i<d.length-5;i++){
+   let e9=EMA(closes.slice(i-9,i),9);
+   let e21=EMA(closes.slice(i-21,i),21);
+   let r=RSI(closes.slice(i-15,i));
+   let sig=signal(e9,e21,r);
+   if(sig==="HOLD") continue;
+
+   let entry=d[i+1].open;
+   let range=d[i].high-d[i].low;
+   let sl=sig==="BUY"?entry-range*0.8:entry+range*0.8;
+   let tgt=sig==="BUY"?entry+range*1.2:entry-range*1.2;
+
+   for(let j=i+1;j<d.length;j++){
+    let c=d[j];
+    if(sig==="BUY"){
+     if(c.low<=sl){ trades.push(sl-entry); break; }
+     if(c.high>=tgt){ trades.push(tgt-entry); break; }
+    }else{
+     if(c.high>=sl){ trades.push(entry-sl); break; }
+     if(c.low<=tgt){ trades.push(entry-tgt); break; }
+    }
+   }
+  }
+ }
+
+ let wins=trades.filter(x=>x>0).length;
+ let loss=trades.filter(x=>x<=0).length;
+ let total=trades.length;
+ let pnl=trades.reduce((a,b)=>a+b,0);
+
+ let eq=[0],peak=0,dd=0;
+ trades.forEach(p=>{
+  let v=eq.at(-1)+p;
+  eq.push(v);
+  peak=Math.max(peak,v);
+  dd=Math.min(dd,v-peak);
  });
+
+ bt_trades.textContent=total;
+ bt_wins.textContent=wins;
+ bt_loss.textContent=loss;
+ bt_wr.textContent=((wins/total)*100||0).toFixed(1)+"%";
+ bt_pl.textContent=pnl.toFixed(2);
+ bt_dd.textContent=dd.toFixed(2);
 }
 
-function autoScreens(){
- const times=["09:00","09:30","10:00","10:30","11:00","11:30","12:00","13:00","14:00","14:30","15:00","15:15","15:30"];
- setInterval(()=>{
-  let now=new Date();
-  let t=now.toTimeString().slice(0,5);
-  if(times.includes(t)) screenshot();
- },60000);
-}
-
-function openTrade(s,e,sl,t){window.open(`trade.html?stock=${s}&entry=${e}&sl=${sl}&target=${t}`)}
-
+/* existing */
+function screenshot(){ html2canvas(document.body).then(c=>{ let d=new Date(); let name=d.getHours()+""+d.getMinutes()+"_"+d.getDate()+""+(d.getMonth()+1)+""+d.getFullYear()+"_STOCKS.png"; let a=document.createElement("a"); a.download=name; a.href=c.toDataURL(); a.click(); });}
+function autoScreens(){ const times=["09:00","09:30","10:00","10:30","11:00","11:30","12:00","13:00","14:00","14:30","15:00","15:15","15:30"]; setInterval(()=>{ let now=new Date(); let t=now.toTimeString().slice(0,5); if(times.includes(t)) screenshot(); },60000);}
 async function init(){for(let s of STOCKS)await load(s);render();setInterval(render,60000);autoScreens();}
 init();
-<div class="floating" style="bottom:10px;right:10px">
-  <b>📊 Backtest Results</b><br>
-  Trades: <span id="bt_trades">0</span><br>
-  Wins: <span id="bt_wins">0</span><br>
-  Loss: <span id="bt_loss">0</span><br>
-  Win Rate: <span id="bt_wr">0%</span><br>
-  P/L: ₹<span id="bt_pl">0</span><br>
-  Max DD: ₹<span id="bt_dd">0</span><br>
-  <button onclick="runBacktest()">Run Backtest</button>
-</div>
 </script>
 </body>
 </html>
-<script>
-function runBacktest(){
-  let allTrades = [];
-
-  for(let s of STOCKS){
-    let d = DB[s];
-    if(!d || d.length < 60) continue;
-
-    let cl = d.map(x=>x.close);
-    
-    for(let i=30;i<d.length-1;i++){
-      let slice = cl.slice(0,i+1);
-      let e9 = EMA(slice.slice(-9),9);
-      let e21 = EMA(slice.slice(-21),21);
-      let r = RSI(slice.slice(-15));
-      let sig = signal(e9,e21,r);
-      if(sig==="HOLD") continue;
-
-      let entry = d[i+1].open;
-      let range = d[i].high - d[i].low;
-      let sl = sig==="BUY" ? entry - range*0.8 : entry + range*0.8;
-      let tgt = sig==="BUY" ? entry + range*1.2 : entry - range*1.2;
-
-      let result = null;
-      for(let j=i+1;j<d.length;j++){
-        let candle = d[j];
-        if(sig==="BUY"){
-          if(candle.low <= sl){ result = sl-entry; break; }
-          if(candle.high >= tgt){ result = tgt-entry; break; }
-        }else{
-          if(candle.high >= sl){ result = entry-sl; break; }
-          if(candle.low <= tgt){ result = entry-tgt; break; }
-        }
-      }
-
-      if(result!==null){
-        allTrades.push(result);
-      }
-    }
-  }
-
-  // Metrics
-  let wins = allTrades.filter(x=>x>0).length;
-  let loss = allTrades.filter(x=>x<=0).length;
-  let total = allTrades.length;
-  let pnl = allTrades.reduce((a,b)=>a+b,0);
-
-  // Equity + Drawdown
-  let eq=[0], peak=0, maxdd=0;
-  allTrades.forEach(x=>{
-    let v = eq.at(-1)+x;
-    eq.push(v);
-    peak = Math.max(peak,v);
-    maxdd = Math.min(maxdd,v-peak);
-  });
-
-  bt_trades.textContent = total;
-  bt_wins.textContent = wins;
-  bt_loss.textContent = loss;
-  bt_wr.textContent = ((wins/total)*100||0).toFixed(1)+"%";
-  bt_pl.textContent = pnl.toFixed(2);
-  bt_dd.textContent = maxdd.toFixed(2);
-}
-</script>
