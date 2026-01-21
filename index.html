@@ -41,29 +41,8 @@ canvas{background:#020617;border:1px solid #1f2937;border-radius:8px}
 
 <header>
   <div class="controls">
-    <input type="date" id="date" />
-    <button onclick="render()">Submit</button>
-    <input id="search" placeholder="Search..." oninput="render()" />
-    <button onclick="filter='buy';render()">Only Buy</button>
-    <button onclick="filter='sell';render()">Only Sell</button>
-    <button onclick="filter='all';render()">All</button>
-    <select id="sort" onchange="render()">
-      <option value="">Sort</option>
-      <option value="volDesc">Volume ↓</option>
-      <option value="volAsc">Volume ↑</option>
-      <option value="rsiDesc">RSI ↓</option>
-      <option value="rsiAsc">RSI ↑</option>
-      <option value="priceDesc">Price ↓</option>
-      <option value="priceAsc">Price ↑</option>
-      <option value="chgDesc">%Change ↓</option>
-      <option value="chgAsc">%Change ↑</option>
-    </select>
-    <input id="newStock" placeholder="Add stock" />
-    <button onclick="addStock()">Add</button>
-    <button onclick="muted=!muted">Mute</button>
     <button onclick="screenshot()">📸 Screenshot</button>
   </div>
-  <div style="font-size:11px;color:#94a3b8">Last refresh: <span id="time"></span></div>
 </header>
 
 <div class="container">
@@ -94,98 +73,112 @@ Win Rate: <span id="st_win">0%</span>
 </div>
 
 <div class="floating" style="bottom:10px;right:10px">
-<b>📈 P/L Curve</b><br>
-<canvas id="curve" width="240" height="120"></canvas>
+<b>📈 Equity + Monte Carlo</b><br>
+<canvas id="curve" width="280" height="140"></canvas>
 </div>
 
 <script>
 const WORKER="https://red-tooth-e4f7.lovelyideas-in.workers.dev";
 const API=s=>`${WORKER}?symbol=${s}`;
 
-const TELEGRAM_BOT="8168507195:AAHXFWjfWqDZ4A4ZWnBIIsoc9wu2yp6uGmU";
-const TELEGRAM_CHAT="1652821502";
-
-let BASE=["SBIN","IDEA","RVNL","TCS"];
-let STOCKS=[...BASE];
-
-let DB={}, last={}, journal=[], equity=[0];
+let STOCKS=["SBIN","IDEA","RVNL","TCS"];
+let DB={}, openTrades={}, journal=[], equity=[0];
 
 const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e}
 const RSI=a=>{let g=0,l=0;for(let i=1;i<=14;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}let rs=g/(l||1);return 100-(100/(1+rs))}
-function signal(e9,e21,r){return e9>e21&&r>60?"BUY":e9<e21&&r<40?"SELL":"HOLD"}
+const signal=(e9,e21,r)=>e9>e21&&r>60?"BUY":e9<e21&&r<40?"SELL":"HOLD";
 
 function parse(j){
- try{
-  let r=j.chart.result[0],q=r.indicators.quote[0];
-  return r.timestamp.map((t,i)=>({
-    date:new Date(t*1000).toISOString().slice(0,10),
-    open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i],volume:q.volume?.[i]||0
-  })).filter(x=>x.close);
- }catch{return []}
+ let r=j.chart.result[0],q=r.indicators.quote[0];
+ return r.timestamp.map((t,i)=>({
+   open:q.open[i],high:q.high[i],low:q.low[i],close:q.close[i],volume:q.volume?.[i]||0
+ })).filter(x=>x.close);
 }
 
-async function load(s){DB[s]=parse(await (await fetch(API(s))).json())}
+async function load(s){ DB[s]=parse(await (await fetch(API(s))).json()) }
 
-function backtest(stock,data){
- let trades=[];
- for(let i=30;i<data.length-1;i++){
-  let slice=data.slice(0,i+1);
-  let cl=slice.map(x=>x.close);
-  let e9=EMA(cl.slice(-9),9),e21=EMA(cl.slice(-21),21),r=RSI(cl.slice(-15));
-  let sig=signal(e9,e21,r);
-  if(sig==="HOLD")continue;
-
-  let entry=data[i+1].open;
-  let range=data[i].high-data[i].low;
-  let sl=sig==="BUY"?entry-range*0.8:entry+range*0.8;
-  let tgt=sig==="BUY"?entry+range*1.2:entry-range*1.2;
-
-  for(let j=i+1;j<data.length;j++){
-    let c=data[j];
-    if(sig==="BUY"){
-      if(c.low<=sl){trades.push(entry-sl);break}
-      if(c.high>=tgt){trades.push(tgt-entry);break}
-    } else {
-      if(c.high>=sl){trades.push(sl-entry);break}
-      if(c.low<=tgt){trades.push(entry-tgt);break}
-    }
-  }
- }
- return trades;
+function logTrade(stock,type,entry,exit){
+ let pnl=(exit-entry)*(type==="BUY"?1:-1);
+ journal.push({stock,type,pnl});
+ equity.push(equity.at(-1)+pnl);
+ renderJournal(); renderCurve(); updateStats();
 }
 
-function updateStats(trades){
- let wins=trades.filter(x=>x>0).length;
- st_trades.textContent=trades.length;
+function renderJournal(){
+ journal.innerHTML = journal.slice(-8).reverse().map(t=>`<div>${t.stock} ${t.type} P/L: ${t.pnl.toFixed(2)}</div>`).join("");
+}
+
+function updateStats(){
+ let wins=journal.filter(t=>t.pnl>0).length;
+ st_trades.textContent=journal.length;
  st_wins.textContent=wins;
- st_loss.textContent=trades.length-wins;
- st_win.textContent=((wins/(trades.length||1))*100).toFixed(1)+"%";
+ st_loss.textContent=journal.length-wins;
+ st_win.textContent=((wins/(journal.length||1))*100).toFixed(1)+"%";
 }
 
-function drawCurve(trades){
- let eq=[0];
- trades.forEach(p=>eq.push(eq.at(-1)+p));
+function renderCurve(){
  let c=curve,ctx=c.getContext("2d");
  ctx.clearRect(0,0,c.width,c.height);
- let max=Math.max(...eq),min=Math.min(...eq);
- ctx.beginPath();ctx.strokeStyle="#22c55e";
- eq.forEach((v,i)=>{
-  let x=i*(c.width/(eq.length-1||1));
-  let y=c.height-((v-min)/(max-min||1))*c.height;
+
+ // draw equity
+ drawLine(equity,"#22c55e");
+
+ // Monte Carlo
+ let sims=[];
+ for(let i=0;i<50;i++){
+  let shuffled=[...journal.map(t=>t.pnl)].sort(()=>Math.random()-0.5);
+  let eq=[0];shuffled.forEach(p=>eq.push(eq.at(-1)+p));
+  drawLine(eq,"rgba(255,255,255,0.03)");
+ }
+}
+
+function drawLine(arr,color){
+ let ctx=curve.getContext("2d"),w=curve.width,h=curve.height;
+ let max=Math.max(...arr),min=Math.min(...arr);
+ ctx.beginPath();ctx.strokeStyle=color;
+ arr.forEach((v,i)=>{
+  let x=i*(w/(arr.length-1||1));
+  let y=h-((v-min)/(max-min||1))*h;
   i?ctx.lineTo(x,y):ctx.moveTo(x,y);
  });
  ctx.stroke();
 }
 
-async function init(){
- let all=[];
+function render(){
  for(let s of STOCKS){
-  await load(s);
-  let t=backtest(s,DB[s]);
-  all.push(...t);
+  let d=DB[s]; if(!d||d.length<40)continue;
+  let t=d.at(-1),cl=d.map(x=>x.close);
+  let e9=EMA(cl.slice(-9),9),e21=EMA(cl.slice(-21),21),r=RSI(cl.slice(-15));
+  let sig=signal(e9,e21,r);
+
+  // live paper trading
+  if(!openTrades[s] && sig!=="HOLD"){
+    let range=t.high-t.low;
+    let entry=t.close;
+    let sl=sig==="BUY"?entry-range*0.8:entry+range*0.8;
+    let tgt=sig==="BUY"?entry+range*1.2:entry-range*1.2;
+    openTrades[s]={type:sig,entry,sl,tgt};
+  }
+
+  if(openTrades[s]){
+    let ot=openTrades[s];
+    if(ot.type==="BUY"){
+      if(t.low<=ot.sl){logTrade(s,"BUY",ot.entry,ot.sl);delete openTrades[s];}
+      if(t.high>=ot.tgt){logTrade(s,"BUY",ot.entry,ot.tgt);delete openTrades[s];}
+    } else {
+      if(t.high>=ot.sl){logTrade(s,"SELL",ot.entry,ot.sl);delete openTrades[s];}
+      if(t.low<=ot.tgt){logTrade(s,"SELL",ot.entry,ot.tgt);delete openTrades[s];}
+    }
+  }
  }
- updateStats(all);
- drawCurve(all);
+
+ tbody.innerHTML=STOCKS.map(s=>`<tr><td>${s}</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td></tr>`).join("");
+}
+
+async function init(){
+ for(let s of STOCKS)await load(s);
+ render();
+ setInterval(render,60000);
 }
 init();
 </script>
