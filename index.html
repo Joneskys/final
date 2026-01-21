@@ -33,7 +33,6 @@ tr:nth-child(even) { background:#0f172a }
 }
 .popup{position:fixed;bottom:20px;right:20px;background:#020617;border:1px solid var(--border);padding:10px;border-radius:12px;display:none}
 
-/* backtest panel */
 .backtest{
  position:fixed;right:10px;bottom:10px;
  background:#020617;border:1px solid #1f2937;
@@ -86,7 +85,6 @@ tr:nth-child(even) { background:#0f172a }
 
 <div class="popup" id="popup"><div id="popupText"></div><button onclick="popup.style.display='none'">Close</button></div>
 
-<!-- Backtest Panel -->
 <div class="backtest">
 <b>📊 Backtester</b><br>
 Trades: <span id="bt_trades">0</span><br>
@@ -112,17 +110,18 @@ let STOCKS=[...new Set([...BASE,...user])];
 let DB={}, filter="all", muted=false, last={};
 
 const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e}
-const RSI=a=>{let g=0,l=0;for(let i=1;i<=14;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}let rs=g/(l||1);return 100-(100/(1+rs))}
-function signal(e9,e21,r){ return e9>e21 && r>60 ? "BUY" : e9<e21 && r<40 ? "SELL" : "HOLD"; }
 
-function sendTelegram(msg){
- if(!TELEGRAM_BOT || !TELEGRAM_CHAT) return;
- fetch(`https://api.telegram.org/bot${TELEGRAM_BOT}/sendMessage`,{
-  method:"POST",
-  headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({chat_id:TELEGRAM_CHAT,text:msg})
- });
+function RSI(arr){
+ let gains=0,losses=0;
+ for(let i=1;i<arr.length;i++){
+  let diff=arr[i]-arr[i-1];
+  if(diff>=0) gains+=diff; else losses-=diff;
+ }
+ let rs=gains/(losses||1);
+ return 100-(100/(1+rs));
 }
+
+function signal(e9,e21,r){ return e9>e21 && r>60 ? "BUY" : e9<e21 && r<40 ? "SELL" : "HOLD"; }
 
 function parse(j){
  try{
@@ -132,10 +131,7 @@ function parse(j){
  }catch{return []}
 }
 
-async function load(s){
- try{DB[s]=parse(await (await fetch(API(s))).json());}
- catch{DB[s]=[];}
-}
+async function load(s){ try{DB[s]=parse(await (await fetch(API(s))).json());} catch{DB[s]=[]} }
 
 function addStock(){
  let s=newStock.value.trim().toUpperCase();
@@ -143,110 +139,49 @@ function addStock(){
  newStock.value="";
 }
 
-/* --- YOUR EXISTING RENDER FUNCTION (UNCHANGED) --- */
-function render(){
- time.textContent=new Date().toLocaleTimeString();
- let q=search.value.toLowerCase(), selected=date.value, rows=[];
- for(let s of STOCKS){
-  let d=DB[s]; if(!d||d.length<30)continue;
-  if(selected)d=d.filter(x=>x.date<=selected);
-  if(d.length<30)continue;
-  if(q&&!s.toLowerCase().includes(q))continue;
-
-  let t=d.at(-1), prev=d.at(-2), cl=d.map(x=>x.close);
-  let e9=EMA(cl.slice(-9),9),e21=EMA(cl.slice(-21),21),r=RSI(cl.slice(-15));
-  let m=d.slice(-21),w=d.slice(-6);
-  let sup=Math.min(...m.map(x=>x.low)),res=Math.max(...m.map(x=>x.high));
-  let sig=signal(e9,e21,r);
-  if(filter==='buy'&&sig!=='BUY')continue;
-  if(filter==='sell'&&sig!=='SELL')continue;
-
-  let entry=t.close, range=t.high-t.low;
-  let sl=sig==='BUY'?entry-range*0.8:entry+range*0.8;
-  let tgt=sig==='BUY'?entry+range*1.2:entry-range*1.2;
-  let vol=Math.round(t.volume/100000);
-  let chg=((entry-prev.close)/prev.close)*100;
-
-  let diff=(e9-e21)/e21*100;
-  let arrow=diff>0.15?`<span class="green bold">↑</span>`:diff<-0.15?`<span class="red bold">↓</span>`:`<span class="orange bold">→</span>`;
-
-  rows.push({s,entry,sl,tgt,vol,chg,t,w,m,sup,res,r,e9,e21,sig,arrow});
- }
-
- let srt=sort.value;
- if(srt==="volDesc")rows.sort((a,b)=>b.vol-a.vol);
- if(srt==="volAsc")rows.sort((a,b)=>a.vol-b.vol);
- if(srt==="rsiDesc")rows.sort((a,b)=>b.r-a.r);
- if(srt==="rsiAsc")rows.sort((a,b)=>a.r-b.r);
- if(srt==="priceDesc")rows.sort((a,b)=>b.entry-a.entry);
- if(srt==="priceAsc")rows.sort((a,b)=>a.entry-b.entry);
- if(srt==="chgDesc")rows.sort((a,b)=>b.chg-a.chg);
- if(srt==="chgAsc")rows.sort((a,b)=>a.chg-b.chg);
-
- tbody.innerHTML=rows.map(r=>{
-  if(r.sig!=="HOLD" && last[r.s]!==r.sig){
-   last[r.s]=r.sig;
-   popupText.innerHTML=`<b class="${r.sig==='BUY'?'green':'red'}">${r.s} ${r.sig}</b>`;
-   popup.style.display='block';
-   if(!muted){
-    let a=new Audio("https://actions.google.com/sounds/v1/alarms/beep_short.ogg");
-    a.play();setTimeout(()=>a.pause(),3000);
-   }
-   let cmd = r.sig === "BUY" ? "buy" : "sell";
-   sendTelegram(`/${cmd} ${r.s} @${r.entry.toFixed(2)} SL ${r.sl.toFixed(2)} Target ${r.tgt.toFixed(2)}`);
-  }
-
-  let cls=r.sig==="BUY"?"green":r.sig==="SELL"?"red":"";
-  return `<tr>
-<td><button class="stockBtn ${cls}">${r.arrow} ${r.s}</button></td>
-<td>${r.entry.toFixed(2)}</td>
-<td>${r.sl.toFixed(2)}</td>
-<td>${r.tgt.toFixed(2)}</td>
-<td>${r.vol}</td>
-<td style="font-size:10px">L:${r.t.low.toFixed(1)} H:${r.t.high.toFixed(1)} (${r.chg.toFixed(2)}%)</td>
-<td style="font-size:10px">L:${Math.min(...r.w.map(x=>x.low)).toFixed(1)} H:${Math.max(...r.w.map(x=>x.high)).toFixed(1)}</td>
-<td style="font-size:10px">L:${Math.min(...r.m.map(x=>x.low)).toFixed(1)} H:${Math.max(...r.m.map(x=>x.high)).toFixed(1)}</td>
-<td>${r.sup.toFixed(2)}</td>
-<td>${r.res.toFixed(2)}</td>
-<td>${r.r.toFixed(1)}</td>
-<td>${r.e9.toFixed(2)}</td>
-<td>${r.e21.toFixed(2)}</td>
-<td class="${r.sig==='BUY'?'green':r.sig==='SELL'?'red':'orange'}">${r.sig}</td>
-</tr>`;
- }).join("");
-}
-
-/* ------------ REAL BACKTESTER ------------ */
+/* ---------- BACKTESTER FIXED ---------- */
 function runBacktest(){
  let trades=[];
 
  for(let s of STOCKS){
-  let d = DB[s];
-  if(!d || d.length<80) continue;
+  let d=DB[s];
+  if(!d || d.length<120) continue;
 
   let closes=d.map(x=>x.close);
 
   for(let i=30;i<d.length-5;i++){
-   let e9=EMA(closes.slice(i-9,i),9);
-   let e21=EMA(closes.slice(i-21,i),21);
-   let r=RSI(closes.slice(i-15,i));
+   let slice=closes.slice(0,i+1);
+
+   let e9=EMA(slice.slice(-9),9);
+   let e21=EMA(slice.slice(-21),21);
+   let r=RSI(slice.slice(-15));
    let sig=signal(e9,e21,r);
    if(sig==="HOLD") continue;
 
-   let entry=d[i+1].open;
+   let entry=d[i].close;
    let range=d[i].high-d[i].low;
+   if(range<=0) continue;
+
    let sl=sig==="BUY"?entry-range*0.8:entry+range*0.8;
    let tgt=sig==="BUY"?entry+range*1.2:entry-range*1.2;
+
+   let closed=false;
 
    for(let j=i+1;j<d.length;j++){
     let c=d[j];
     if(sig==="BUY"){
-     if(c.low<=sl){ trades.push(sl-entry); break; }
-     if(c.high>=tgt){ trades.push(tgt-entry); break; }
+     if(c.low<=sl){ trades.push(-1); closed=true; break; }
+     if(c.high>=tgt){ trades.push(+1.5); closed=true; break; }
     }else{
-     if(c.high>=sl){ trades.push(entry-sl); break; }
-     if(c.low<=tgt){ trades.push(entry-tgt); break; }
+     if(c.high>=sl){ trades.push(-1); closed=true; break; }
+     if(c.low<=tgt){ trades.push(+1.5); closed=true; break; }
     }
+   }
+
+   if(!closed){
+    let last=d.at(-1).close;
+    let pnl=sig==="BUY"?last-entry:entry-last;
+    trades.push(pnl>0?0.5:-0.5);
    }
   }
  }
