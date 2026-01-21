@@ -22,13 +22,13 @@ th,td { border:1px solid var(--border); padding:3px 4px; text-align:center; whit
 th { background:#020617; position:sticky; top:60px }
 tr:nth-child(even) { background:#0f172a }
 
-.green{color:var(--green);font-weight:800}
-.red{color:var(--red);font-weight:800}
-.orange{color:var(--orange);font-weight:800}
+.green{color:#22c55e;font-weight:800}
+.red{color:#ef4444;font-weight:800}
+.orange{color:#f59e0b;font-weight:800}
 .bold{font-weight:900}
 
 .stockBtn{background:none;border:none;cursor:pointer;font-weight:900;font-size:14px;}
-.popup{position:fixed;bottom:20px;right:20px;background:#020617;border:1px solid var(--border);padding:10px;border-radius:12px;display:none}
+.popup{position:fixed;bottom:20px;right:20px;background:#020617;border:1px solid #1f2937;padding:10px;border-radius:12px;display:none}
 
 .floating{
 position:fixed;right:10px;background:#020617;border:1px solid #1f2937;
@@ -80,8 +80,6 @@ canvas{background:#020617;border:1px solid #1f2937;border-radius:8px}
 </table>
 </div>
 
-<div class="popup" id="popup"><div id="popupText"></div><button onclick="popup.style.display='none'">Close</button></div>
-
 <div class="floating" style="top:80px">
 <b>📊 Strategy Stats</b><br>
 Trades: <span id="st_trades">0</span><br>
@@ -102,63 +100,15 @@ Win Rate: <span id="st_win">0%</span>
 
 <script>
 const WORKER="https://red-tooth-e4f7.lovelyideas-in.workers.dev";
-const API=s=>`${WORKER}/candles?symbol=${s}`; // <-- FIXED for GitHub pages
+const API=s=>`${WORKER}?symbol=${s}`;
 
 const TELEGRAM_BOT="8168507195:AAHXFWjfWqDZ4A4ZWnBIIsoc9wu2yp6uGmU";
 const TELEGRAM_CHAT="1652821502";
 
 let BASE=["SBIN","IDEA","RVNL","TCS"];
-let user=JSON.parse(localStorage.getItem("stocks")||"[]");
-let STOCKS=[...new Set([...BASE,...user])];
+let STOCKS=[...BASE];
 
-let DB={}, filter="all", muted=false, last={};
-
-let journal=JSON.parse(localStorage.getItem("journal")||"[]");
-let equity=JSON.parse(localStorage.getItem("equity")||"[0]");
-
-function logTrade(stock,type,entry,exit){
- let pnl=(exit-entry)*(type==="BUY"?1:-1);
- journal.push({time:new Date().toLocaleTimeString(),stock,type,entry,exit,pnl});
- localStorage.setItem("journal",JSON.stringify(journal));
- equity.push((equity.at(-1)||0)+pnl);
- localStorage.setItem("equity",JSON.stringify(equity));
- renderJournal(); renderCurve(); updateStats();
-}
-
-function renderJournal(){
- journal.innerHTML = journal.slice(-10).reverse().map(t =>
-  `<div>${t.time} ${t.stock} ${t.type} P/L: ${t.pnl.toFixed(2)}</div>`
- ).join("");
-}
-
-function renderCurve(){
- let c=document.getElementById("curve"),ctx=c.getContext("2d");
- ctx.clearRect(0,0,c.width,c.height);
- let max=Math.max(...equity),min=Math.min(...equity);
- ctx.beginPath(); ctx.strokeStyle="#22c55e";
- equity.forEach((v,i)=>{
-  let x=i*(c.width/(equity.length-1||1));
-  let y=c.height-((v-min)/(max-min||1))*c.height;
-  i?ctx.lineTo(x,y):ctx.moveTo(x,y);
- });
- ctx.stroke();
-}
-
-function updateStats(){
- let wins=journal.filter(t=>t.pnl>0).length;
- let loss=journal.filter(t=>t.pnl<=0).length;
- st_trades.textContent=journal.length;
- st_wins.textContent=wins;
- st_loss.textContent=loss;
- st_win.textContent=((wins/(journal.length||1))*100).toFixed(1)+"%";
-}
-
-function sendTelegram(msg){
- fetch(`https://api.telegram.org/bot${TELEGRAM_BOT}/sendMessage`,{
-  method:"POST",headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({chat_id:TELEGRAM_CHAT,text:msg})
- });
-}
+let DB={}, last={}, journal=[], equity=[0];
 
 const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e}
 const RSI=a=>{let g=0,l=0;for(let i=1;i<=14;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}let rs=g/(l||1);return 100-(100/(1+rs))}
@@ -174,57 +124,68 @@ function parse(j){
  }catch{return []}
 }
 
-async function load(s){
- try{
-  const res = await fetch(API(s));
-  const data = await res.json();
-  DB[s] = parse(data);
- }catch(e){
-  console.error("Fetch failed", s, e);
-  DB[s]=[];
- }
-}
+async function load(s){DB[s]=parse(await (await fetch(API(s))).json())}
 
-function render(){
- time.textContent=new Date().toLocaleTimeString();
- let rows=[];
- for(let s of STOCKS){
-  let d=DB[s]; if(!d||d.length<30)continue;
-  let t=d.at(-1), prev=d.at(-2), cl=d.map(x=>x.close);
+function backtest(stock,data){
+ let trades=[];
+ for(let i=30;i<data.length-1;i++){
+  let slice=data.slice(0,i+1);
+  let cl=slice.map(x=>x.close);
   let e9=EMA(cl.slice(-9),9),e21=EMA(cl.slice(-21),21),r=RSI(cl.slice(-15));
   let sig=signal(e9,e21,r);
-  let entry=t.close,range=t.high-t.low;
+  if(sig==="HOLD")continue;
+
+  let entry=data[i+1].open;
+  let range=data[i].high-data[i].low;
   let sl=sig==="BUY"?entry-range*0.8:entry+range*0.8;
   let tgt=sig==="BUY"?entry+range*1.2:entry-range*1.2;
-  let vol=Math.round(t.volume/100000);
-  let chg=((entry-prev.close)/prev.close)*100;
-  rows.push({s,entry,sl,tgt,vol,chg,sig});
- }
 
- tbody.innerHTML=rows.map(r=>{
-  if(r.sig!=="HOLD" && last[r.s]!==r.sig){
-   last[r.s]=r.sig;
-   sendTelegram(`/${r.sig.toLowerCase()} ${r.s} @${r.entry.toFixed(2)}`);
-   logTrade(r.s,r.sig,r.entry,r.tgt);
+  for(let j=i+1;j<data.length;j++){
+    let c=data[j];
+    if(sig==="BUY"){
+      if(c.low<=sl){trades.push(entry-sl);break}
+      if(c.high>=tgt){trades.push(tgt-entry);break}
+    } else {
+      if(c.high>=sl){trades.push(sl-entry);break}
+      if(c.low<=tgt){trades.push(entry-tgt);break}
+    }
   }
-  return `<tr>
-<td><button class="stockBtn ${r.sig==="BUY"?"green":r.sig==="SELL"?"red":""}">${r.s}</button></td>
-<td>${r.entry.toFixed(2)}</td>
-<td>${r.sl.toFixed(2)}</td>
-<td>${r.tgt.toFixed(2)}</td>
-<td>${r.vol}</td>
-<td>${r.chg.toFixed(2)}%</td>
-<td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td><td>-</td>
-<td class="${r.sig==="BUY"?"green":r.sig==="SELL"?"red":"orange"}">${r.sig}</td>
-</tr>`;
- }).join("");
+ }
+ return trades;
+}
+
+function updateStats(trades){
+ let wins=trades.filter(x=>x>0).length;
+ st_trades.textContent=trades.length;
+ st_wins.textContent=wins;
+ st_loss.textContent=trades.length-wins;
+ st_win.textContent=((wins/(trades.length||1))*100).toFixed(1)+"%";
+}
+
+function drawCurve(trades){
+ let eq=[0];
+ trades.forEach(p=>eq.push(eq.at(-1)+p));
+ let c=curve,ctx=c.getContext("2d");
+ ctx.clearRect(0,0,c.width,c.height);
+ let max=Math.max(...eq),min=Math.min(...eq);
+ ctx.beginPath();ctx.strokeStyle="#22c55e";
+ eq.forEach((v,i)=>{
+  let x=i*(c.width/(eq.length-1||1));
+  let y=c.height-((v-min)/(max-min||1))*c.height;
+  i?ctx.lineTo(x,y):ctx.moveTo(x,y);
+ });
+ ctx.stroke();
 }
 
 async function init(){
- for(let s of STOCKS) await load(s);
- render();
- setInterval(render,60000);
- renderJournal(); renderCurve(); updateStats();
+ let all=[];
+ for(let s of STOCKS){
+  await load(s);
+  let t=backtest(s,DB[s]);
+  all.push(...t);
+ }
+ updateStats(all);
+ drawCurve(all);
 }
 init();
 </script>
