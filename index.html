@@ -224,6 +224,80 @@ function openTrade(s,e,sl,t){window.open(`trade.html?stock=${s}&entry=${e}&sl=${
 
 async function init(){for(let s of STOCKS)await load(s);render();setInterval(render,60000);autoScreens();}
 init();
+<div class="floating" style="bottom:10px;right:10px">
+  <b>📊 Backtest Results</b><br>
+  Trades: <span id="bt_trades">0</span><br>
+  Wins: <span id="bt_wins">0</span><br>
+  Loss: <span id="bt_loss">0</span><br>
+  Win Rate: <span id="bt_wr">0%</span><br>
+  P/L: ₹<span id="bt_pl">0</span><br>
+  Max DD: ₹<span id="bt_dd">0</span><br>
+  <button onclick="runBacktest()">Run Backtest</button>
+</div>
 </script>
 </body>
 </html>
+<script>
+function runBacktest(){
+  let allTrades = [];
+
+  for(let s of STOCKS){
+    let d = DB[s];
+    if(!d || d.length < 60) continue;
+
+    let cl = d.map(x=>x.close);
+    
+    for(let i=30;i<d.length-1;i++){
+      let slice = cl.slice(0,i+1);
+      let e9 = EMA(slice.slice(-9),9);
+      let e21 = EMA(slice.slice(-21),21);
+      let r = RSI(slice.slice(-15));
+      let sig = signal(e9,e21,r);
+      if(sig==="HOLD") continue;
+
+      let entry = d[i+1].open;
+      let range = d[i].high - d[i].low;
+      let sl = sig==="BUY" ? entry - range*0.8 : entry + range*0.8;
+      let tgt = sig==="BUY" ? entry + range*1.2 : entry - range*1.2;
+
+      let result = null;
+      for(let j=i+1;j<d.length;j++){
+        let candle = d[j];
+        if(sig==="BUY"){
+          if(candle.low <= sl){ result = sl-entry; break; }
+          if(candle.high >= tgt){ result = tgt-entry; break; }
+        }else{
+          if(candle.high >= sl){ result = entry-sl; break; }
+          if(candle.low <= tgt){ result = entry-tgt; break; }
+        }
+      }
+
+      if(result!==null){
+        allTrades.push(result);
+      }
+    }
+  }
+
+  // Metrics
+  let wins = allTrades.filter(x=>x>0).length;
+  let loss = allTrades.filter(x=>x<=0).length;
+  let total = allTrades.length;
+  let pnl = allTrades.reduce((a,b)=>a+b,0);
+
+  // Equity + Drawdown
+  let eq=[0], peak=0, maxdd=0;
+  allTrades.forEach(x=>{
+    let v = eq.at(-1)+x;
+    eq.push(v);
+    peak = Math.max(peak,v);
+    maxdd = Math.min(maxdd,v-peak);
+  });
+
+  bt_trades.textContent = total;
+  bt_wins.textContent = wins;
+  bt_loss.textContent = loss;
+  bt_wr.textContent = ((wins/total)*100||0).toFixed(1)+"%";
+  bt_pl.textContent = pnl.toFixed(2);
+  bt_dd.textContent = maxdd.toFixed(2);
+}
+</script>
