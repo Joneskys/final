@@ -1,0 +1,52 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Trade Calculator</title>
+<style>
+body{background:#020617;color:white;font-family:system-ui;padding:20px}
+input{padding:6px;background:#0f172a;color:white;border:1px solid #333;border-radius:6px;width:150px}
+.green{color:#22c55e;font-weight:900}
+.red{color:#ef4444;font-weight:900}
+.big{font-size:20px}
+</style>
+</head>
+<body>
+
+<h2 id="stock"></h2>
+
+Buy: <input id="buy"><br><br>
+SL: <input id="sl"><br><br>
+Target: <input id="target"><br><br>
+Qty: <input id="qty"><br><br>
+Budget: <input id="budget"><br><br>
+
+<div class="big">
+<span class="green" id="rrGain"></span> /
+<span class="red" id="rrLoss"></span>
+</div>
+
+<script>
+const url=new URLSearchParams(location.search);
+let stock=url.get("stock"),entry=parseFloat(url.get("entry")),sl=parseFloat(url.get("sl")),tgt=parseFloat(url.get("target"));
+stockEl.textContent=stock;
+
+function round05(x){return Math.round(x*20)/20}
+
+buy.value=round05(entry);
+sl.value=round05(sl);
+target.value=round05(tgt);
+
+function calc(){
+ let b=+buy.value,s=+sl.value,t=+target.value,q=+qty.value||0,cap=+budget.value||0;
+ if(document.activeElement===budget && cap>0) qty.value=Math.floor((cap*5)/b);
+ if(document.activeElement===qty && q>0) budget.value=(q*b/5).toFixed(2);
+
+ rrGain.textContent=`+₹${((t-b)*q).toFixed(2)}`;
+ rrLoss.textContent=`-₹${((b-s)*q).toFixed(2)}`;
+}
+["buy","sl","target","qty","budget"].forEach(id=>document.getElementById(id).oninput=calc);
+calc();
+</script>
+</body>
+</html>
