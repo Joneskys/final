@@ -3,62 +3,74 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Stock Dashboard</title>
+<title>Advanced Stock Dashboard</title>
 <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 
 <style>
-:root { --bg:#0b1220; --panel:#020617; --border:#1f2937; --text:#e5e7eb;
-  --green:#22c55e; --red:#ef4444; --orange:#f59e0b; }
-body { margin:0; background:linear-gradient(#020617,#0b1220); color:var(--text); font-family:system-ui }
-header { position:sticky; top:0; background:#020617; padding:8px; z-index:10; border-bottom:1px solid var(--border); }
-.controls { display:flex; flex-wrap:wrap; gap:6px }
-input,select,button { background:#0f172a; color:#fff; border:1px solid var(--border); padding:5px 7px; border-radius:7px }
-.container { padding:6px }
-table { width:100%; border-collapse:collapse; font-size:13px }
-th,td { border:1px solid var(--border); padding:4px; text-align:center; white-space:nowrap }
-th { background:#020617; position:sticky; top:60px }
-tr:nth-child(even) { background:#0f172a }
-.green{color:var(--green);font-weight:800}
-.red{color:var(--red);font-weight:800}
-.orange{color:var(--orange);font-weight:800}
-.bold{font-weight:900}
-.backtest{position:fixed;right:10px;bottom:10px;background:#020617;border:1px solid #1f2937;padding:10px;border-radius:10px;font-size:12px}
+:root {
+  --bg:#0b1220; --panel:#020617; --border:#1f2937; --text:#e5e7eb;
+  --green:#22c55e; --red:#ef4444; --orange:#f59e0b;
+}
+body{margin:0;background:linear-gradient(#020617,#0b1220);color:var(--text);font-family:system-ui}
+header{position:sticky;top:0;background:#020617;padding:8px;z-index:10;border-bottom:1px solid var(--border)}
+.controls{display:flex;flex-wrap:wrap;gap:6px}
+input,select,button{background:#0f172a;color:#fff;border:1px solid var(--border);padding:6px;border-radius:8px}
+table{width:100%;border-collapse:collapse;font-size:13px}
+th,td{border:1px solid var(--border);padding:4px;text-align:center}
+th{position:sticky;top:60px;background:#020617}
+.green{color:var(--green);font-weight:900}
+.red{color:var(--red);font-weight:900}
+.orange{color:var(--orange);font-weight:900}
+.stockBtn{background:none;border:none;color:white;font-weight:900;cursor:pointer}
+.panel{position:fixed;right:10px;bottom:10px;background:#020617;border:1px solid #1f2937;padding:10px;border-radius:12px;font-size:12px}
 </style>
 </head>
 <body>
 
 <header>
   <div class="controls">
-    <input type="date" id="date" />
+    <input type="date" id="date">
     <button onclick="render()">Submit</button>
-    <input id="search" placeholder="Search..." oninput="render()" />
+    <input id="search" placeholder="Search..." oninput="render()">
     <button onclick="filter='buy';render()">Only Buy</button>
     <button onclick="filter='sell';render()">Only Sell</button>
     <button onclick="filter='all';render()">All</button>
-    <input id="newStock" placeholder="Add stock" />
+    <select id="sort" onchange="render()">
+      <option value="">Sort</option>
+      <option value="priceDesc">Price ↓</option>
+      <option value="priceAsc">Price ↑</option>
+      <option value="volDesc">Volume ↓</option>
+      <option value="volAsc">Volume ↑</option>
+      <option value="rsiDesc">RSI ↓</option>
+      <option value="rsiAsc">RSI ↑</option>
+      <option value="chgDesc">%Change ↓</option>
+      <option value="chgAsc">%Change ↑</option>
+    </select>
+    <input id="newStock" placeholder="Add stock">
     <button onclick="addStock()">Add</button>
+    <button onclick="manualScreenshot()">📸 Screenshot</button>
   </div>
   <div style="font-size:11px;color:#94a3b8">Last refresh: <span id="time"></span></div>
 </header>
 
-<div class="container">
 <table>
 <thead>
 <tr>
-<th>Stock</th><th>Live</th><th>SL</th><th>Target</th><th>Vol(L)</th>
-<th>RSI</th><th>EMA9</th><th>EMA21</th><th>Signal</th>
+<th>Stock</th><th>Live</th><th>%</th><th>Vol(L)</th>
+<th>RSI</th><th>EMA9</th><th>EMA21</th>
+<th>Support</th><th>Resistance</th>
+<th>Entry</th><th>SL</th><th>Target</th><th>Signal</th>
 </tr>
 </thead>
 <tbody id="tbody"></tbody>
 </table>
-</div>
 
-<div class="backtest">
+<div class="panel">
 <b>📊 Backtester</b><br>
 Trades: <span id="bt_trades">0</span><br>
 Wins: <span id="bt_wins">0</span><br>
 Loss: <span id="bt_loss">0</span><br>
-Win Rate: <span id="bt_wr">0%</span><br>
+Win%: <span id="bt_wr">0%</span><br>
 <button onclick="runBacktest()">Run Backtest</button>
 </div>
 
@@ -66,22 +78,35 @@ Win Rate: <span id="bt_wr">0%</span><br>
 const WORKER="https://red-tooth-e4f7.lovelyideas-in.workers.dev";
 const API=s=>`${WORKER}?symbol=${s}&t=${Date.now()}`;
 
-let STOCKS=["SBIN","HDFCBANK","RVNL","IDEA","JPPOWER","TCS"];
-let DB={}, filter="all";
+let BASE=["NIFTYBEES","TATAGOLD","TATSILVER","HINDCOPPER","BSE","SAGILITY","CUPID","IDEA","BHARATCOAL","JPPOWER","HDFCBANK","SBIN","MON100","MEESHO","RVNL","ORIENTTECH","HARAFIN","RBLBANK","IRIS","GREAVESCOT","NTPCGREEN","TCS","KIMS"];
+let user=JSON.parse(localStorage.getItem("stocks")||"[]");
+let STOCKS=[...new Set([...BASE,...user])];
 
-const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e}
-function RSI(a){let g=0,l=0;for(let i=1;i<a.length;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}return 100-(100/(1+(g/(l||1))))}
-function signal(e9,e21,r){return e9>e21&&r>60?"BUY":e9<e21&&r<40?"SELL":"HOLD"}
+let DB={},filter="all";
+
+const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e};
+const RSI=a=>{let g=0,l=0;for(let i=1;i<a.length;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}return 100-(100/(1+(g/(l||1))))};
+const signal=(e9,e21,r)=>e9>e21&&r>60?"BUY":e9<e21&&r<40?"SELL":"HOLD";
 
 async function load(s){
  try{
-  const res=await fetch(API(s));
-  const json=await res.json();
-  DB[s]=json.chart?.result?.[0]?.timestamp?.map((t,i)=>{
-   let q=json.chart.result[0].indicators.quote[0];
-   return {close:q.close[i],high:q.high[i],low:q.low[i],volume:q.volume?.[i]||0};
-  }).filter(x=>x.close);
- }catch(e){console.error(s,e)}
+  let j=await (await fetch(API(s))).json();
+  let q=j.chart.result[0].indicators.quote[0];
+  DB[s]=j.chart.result[0].timestamp.map((t,i)=>({
+   date:new Date(t*1000).toISOString().slice(0,10),
+   close:q.close[i],high:q.high[i],low:q.low[i],volume:q.volume[i]||0
+  })).filter(x=>x.close);
+ }catch(e){console.log("Fail",s)}
+}
+
+function addStock(){
+ let s=newStock.value.trim().toUpperCase();
+ if(s&&!STOCKS.includes(s)){
+  STOCKS.push(s);
+  localStorage.setItem("stocks",JSON.stringify(STOCKS));
+  load(s);
+ }
+ newStock.value="";
 }
 
 function render(){
@@ -90,64 +115,70 @@ function render(){
  for(let s of STOCKS){
   let d=DB[s];
   if(!d||d.length<30) continue;
-
-  let closes=d.map(x=>x.close);
-  let e9=EMA(closes.slice(-9),9);
-  let e21=EMA(closes.slice(-21),21);
-  let r=RSI(closes.slice(-15));
+  let t=d.at(-1),prev=d.at(-2);
+  let cl=d.map(x=>x.close);
+  let e9=EMA(cl.slice(-9),9);
+  let e21=EMA(cl.slice(-21),21);
+  let r=RSI(cl.slice(-15));
   let sig=signal(e9,e21,r);
-  let t=d.at(-1);
+  let chg=((t.close-prev.close)/prev.close)*100;
+  let vol=Math.round(t.volume/100000);
   let range=t.high-t.low;
-  let sl=sig==="BUY"?t.close-range*0.8:t.close+range*0.8;
-  let tgt=sig==="BUY"?t.close+range*1.2:t.close-range*1.2;
-
-  rows.push({s,price:t.close,sl,tgt,r,e9,e21,sig});
+  let entry=t.close;
+  let sl=sig==="BUY"?entry-range*0.8:entry+range*0.8;
+  let tgt=sig==="BUY"?entry+range*1.2:entry-range*1.2;
+  rows.push({s,entry,sl,tgt,vol,r,e9,e21,sig,chg});
  }
+
+ let srt=sort.value;
+ if(srt==="priceDesc")rows.sort((a,b)=>b.entry-a.entry);
+ if(srt==="priceAsc")rows.sort((a,b)=>a.entry-b.entry);
+ if(srt==="volDesc")rows.sort((a,b)=>b.vol-a.vol);
+ if(srt==="volAsc")rows.sort((a,b)=>a.vol-b.vol);
+ if(srt==="rsiDesc")rows.sort((a,b)=>b.r-a.r);
+ if(srt==="rsiAsc")rows.sort((a,b)=>a.r-b.r);
+ if(srt==="chgDesc")rows.sort((a,b)=>b.chg-a.chg);
+ if(srt==="chgAsc")rows.sort((a,b)=>a.chg-b.chg);
 
  tbody.innerHTML=rows.map(r=>`
 <tr>
-<td>${r.s}</td>
-<td>${r.price.toFixed(2)}</td>
-<td>${r.sl.toFixed(2)}</td>
-<td>${r.tgt.toFixed(2)}</td>
-<td>-</td>
+<td><button class="stockBtn ${r.sig==="BUY"?"green":r.sig==="SELL"?"red":"orange"}" onclick="openTrade('${r.s}',${r.entry.toFixed(2)},${r.sl.toFixed(2)},${r.tgt.toFixed(2)})">${r.s}</button></td>
+<td>${r.entry.toFixed(2)}</td>
+<td>${r.chg.toFixed(2)}%</td>
+<td>${r.vol}</td>
 <td>${r.r.toFixed(1)}</td>
 <td>${r.e9.toFixed(2)}</td>
 <td>${r.e21.toFixed(2)}</td>
-<td class="${r.sig==='BUY'?'green':r.sig==='SELL'?'red':'orange'}">${r.sig}</td>
+<td>-</td><td>-</td>
+<td>${r.entry.toFixed(2)}</td>
+<td>${r.sl.toFixed(2)}</td>
+<td>${r.tgt.toFixed(2)}</td>
+<td class="${r.sig==="BUY"?"green":r.sig==="SELL"?"red":"orange"}">${r.sig}</td>
 </tr>`).join("");
 }
 
-function runBacktest(){
- let wins=0,loss=0,trades=0;
- for(let s of STOCKS){
-  let d=DB[s];
-  if(!d||d.length<60) continue;
-  let closes=d.map(x=>x.close);
-  for(let i=30;i<d.length-5;i++){
-   let e9=EMA(closes.slice(0,i).slice(-9),9);
-   let e21=EMA(closes.slice(0,i).slice(-21),21);
-   let r=RSI(closes.slice(0,i).slice(-15));
-   let sig=signal(e9,e21,r);
-   if(sig==="HOLD") continue;
-   trades++;
-   let entry=d[i].close;
-   let exit=d[i+3].close;
-   let pnl=sig==="BUY"?exit-entry:entry-exit;
-   pnl>0?wins++:loss++;
-  }
- }
- bt_trades.textContent=trades;
- bt_wins.textContent=wins;
- bt_loss.textContent=loss;
- bt_wr.textContent=((wins/trades)*100||0).toFixed(1)+"%";
+function manualScreenshot(){
+ html2canvas(document.body).then(c=>{
+  let d=new Date();
+  let name=`${String(d.getDate()).padStart(2,"0")}${String(d.getMonth()+1).padStart(2,"0")}${d.getFullYear()}_${String(d.getHours()).padStart(2,"0")}${String(d.getMinutes()).padStart(2,"0")}_STOCKS.png`;
+  let a=document.createElement("a");
+  a.download=name;
+  a.href=c.toDataURL();
+  a.click();
+ });
 }
 
-async function init(){
- for(let s of STOCKS) await load(s);
- render();
- setInterval(render,60000);
-}
+// auto screenshot every 30 min between 9-16 Mon-Fri
+setInterval(()=>{
+ let d=new Date();
+ let h=d.getHours(),m=d.getMinutes();
+ let wd=d.getDay();
+ if(wd>=1&&wd<=5 && h>=9&&h<=16 && m%30===0) manualScreenshot();
+},60000);
+
+function openTrade(s,e,sl,t){window.open(`trade.html?stock=${s}&entry=${e}&sl=${sl}&target=${t}`)}
+
+async function init(){for(let s of STOCKS)await load(s);render();setInterval(render,60000);}
 init();
 </script>
 </body>
