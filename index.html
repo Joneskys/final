@@ -61,7 +61,6 @@ tr:nth-child(even) { background:#0f172a }
     <button onclick="screenshot()">📸 Screenshot</button>
   </div>
 
-  <!-- 🔥 MUST TRADE ADDITION -->
   <div class="controls" style="margin-top:6px">
     <input id="budget" type="number" placeholder="Enter budget ₹" />
     <button onclick="openMustTrade()">🔥 MUST TRADE</button>
@@ -90,42 +89,15 @@ tr:nth-child(even) { background:#0f172a }
 const WORKER="https://red-tooth-e4f7.lovelyideas-in.workers.dev";
 const API=s=>`${WORKER}?symbol=${s}`;
 
-const TELEGRAM_BOT = "8168507195:AAHXFWjfWqDZ4A4ZWnBIIsoc9wu2yp6uGmU";
-const TELEGRAM_CHAT = "1652821502";
-
 let BASE=["NIFTYBEES","TATAGOLD","TATSILV","HINDCOPPER","BSE","SAGILITY","CUPID","IDEA","BHARATCOAL","JPPOWER","HDFCBANK","SBIN","MON100","MEESHO","RVNL","ORIENTTECH","HARAFIN","RBLBANK","IRIS","GREAVESCOT","NTPCGREEN","TCS","KIMS"];
 let user=JSON.parse(localStorage.getItem("stocks")||"[]");
 let STOCKS=[...new Set([...BASE,...user])];
 
-let DB={}, filter="all", muted=false, last={};
+let DB={}, filter="all";
 
 const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e}
 const RSI=a=>{let g=0,l=0;for(let i=1;i<=14;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}let rs=g/(l||1);return 100-(100/(1+rs))}
 function signal(e9,e21,r){ return e9>e21 && r>60 ? "BUY" : e9<e21 && r<40 ? "SELL" : "HOLD"; }
-
-function openMustTrade(){
-  let b=document.getElementById("budget").value;
-  if(!b||b<=0){alert("Enter valid budget");return;}
-  if(!window.LAST_ROWS || !LAST_ROWS.length){alert("Wait for data");return;}
-
-  let list=LAST_ROWS.filter(r=>r.sig!=="HOLD");
-  list.forEach(r=>{
-    r.score = Math.abs(r.e9-r.e21)*10 + r.r + (r.vol||0)/10;
-  });
-
-  list.sort((a,b)=>b.score-a.score);
-  localStorage.setItem("mustTradePicks", JSON.stringify(list.slice(0,4)));
-  window.open("must-trade.html");
-}
-
-function sendTelegram(msg){
- if(!TELEGRAM_BOT || !TELEGRAM_CHAT) return;
- fetch(`https://api.telegram.org/bot${TELEGRAM_BOT}/sendMessage`,{
-  method:"POST",
-  headers:{"Content-Type":"application/json"},
-  body:JSON.stringify({chat_id:TELEGRAM_CHAT,text:msg})
- });
-}
 
 function parse(j){
  try{
@@ -169,18 +141,25 @@ function render(){
   let vol=Math.round(t.volume/100000);
   let chg=((entry-prev.close)/prev.close)*100;
 
-  let diff=(e9-e21)/e21*100;
-  let arrow=diff>0.15?`<span class="green bold">↑</span>`:diff<-0.15?`<span class="red bold">↓</span>`:`<span class="orange bold">→</span>`;
-
-  rows.push({s,entry,sl,tgt,vol,chg,t,w,m,sup,res,r,e9,e21,sig,arrow});
+  rows.push({s,entry,sl,tgt,vol,chg,t,w,m,sup,res,r,e9,e21,sig});
  }
+
+ // ✅ SORTING FIXED
+ let srt=sort.value;
+ if(srt==="volDesc") rows.sort((a,b)=>b.vol-a.vol);
+ if(srt==="volAsc") rows.sort((a,b)=>a.vol-b.vol);
+ if(srt==="rsiDesc") rows.sort((a,b)=>b.r-a.r);
+ if(srt==="rsiAsc") rows.sort((a,b)=>a.r-b.r);
+ if(srt==="priceDesc") rows.sort((a,b)=>b.entry-a.entry);
+ if(srt==="priceAsc") rows.sort((a,b)=>a.entry-b.entry);
+ if(srt==="chgDesc") rows.sort((a,b)=>b.chg-a.chg);
+ if(srt==="chgAsc") rows.sort((a,b)=>a.chg-b.chg);
 
  window.LAST_ROWS = rows;
 
- tbody.innerHTML=rows.map(r=>{
-  let cls=r.sig==="BUY"?"green":r.sig==="SELL"?"red":"";
-  return `<tr>
-<td><button class="stockBtn ${cls}">${r.arrow} ${r.s}</button></td>
+ tbody.innerHTML=rows.map(r=>`
+<tr>
+<td>${r.s}</td>
 <td>${r.entry.toFixed(2)}</td>
 <td>${r.sl.toFixed(2)}</td>
 <td>${r.tgt.toFixed(2)}</td>
@@ -194,8 +173,24 @@ function render(){
 <td>${r.e9.toFixed(2)}</td>
 <td>${r.e21.toFixed(2)}</td>
 <td class="${r.sig==='BUY'?'green':r.sig==='SELL'?'red':'orange'}">${r.sig}</td>
-</tr>`;
- }).join("");
+</tr>`).join("");
+}
+
+function openMustTrade(){
+ if(!LAST_ROWS) return;
+
+ let picks = LAST_ROWS
+   .filter(r=>r.sig!=="HOLD")
+   .map(r=>{
+     let rr = Math.abs((r.tgt-r.entry)/(r.entry-r.sl));
+     let score = r.r + Math.abs(r.e9-r.e21)*10 + r.vol/5 + rr*10;
+     return {...r, score, rr};
+   })
+   .filter(r=>r.rr>=1.4 && r.score>80)
+   .sort((a,b)=>b.score-a.score)
+   .slice(0,4);
+
+ alert(picks.map(p=>`${p.s} ${p.sig}\nEntry ${p.entry.toFixed(2)} SL ${p.sl.toFixed(2)} Target ${p.tgt.toFixed(2)}\nProbability ${(60+p.score/3).toFixed(0)}%`).join("\n\n") || "No high probability trades now");
 }
 
 async function init(){for(let s of STOCKS)await load(s);render();setInterval(render,60000);}
