@@ -19,7 +19,7 @@ input,select,button { background:#0f172a; color:#fff; border:1px solid var(--bor
 .container { padding:6px }
 table { width:100%; border-collapse:collapse; font-size:13px }
 th,td { border:1px solid var(--border); padding:3px 4px; text-align:center; white-space:nowrap }
-th { background:#020617; position:sticky; top:80px }
+th { background:#020617; position:sticky; top:60px }
 tr:nth-child(even) { background:#0f172a }
 
 .green{color:var(--green);font-weight:800}
@@ -27,24 +27,16 @@ tr:nth-child(even) { background:#0f172a }
 .orange{color:var(--orange);font-weight:800}
 .bold{font-weight:900}
 
-.stockBtn{background:none;border:none;cursor:pointer;font-weight:900;font-size:14px;}
-.popup{position:fixed;bottom:20px;right:20px;background:#020617;border:1px solid var(--border);padding:10px;border-radius:12px;display:none}
-
-#marketStatus{
-  padding:6px;
-  text-align:center;
-  font-size:12px;
-  font-weight:bold;
+.stockBtn{
+  background:none;border:none;cursor:pointer;
+  font-weight:900;font-size:14px;
 }
+.popup{position:fixed;bottom:20px;right:20px;background:#020617;border:1px solid var(--border);padding:10px;border-radius:12px;display:none}
 </style>
 </head>
 <body>
 
 <header>
-
-  <!-- ✅ Market Status Banner -->
-  <div id="marketStatus">Analyzing market...</div>
-
   <div class="controls">
     <input type="date" id="date" />
     <button onclick="render()">Submit</button>
@@ -68,6 +60,13 @@ tr:nth-child(even) { background:#0f172a }
     <button onclick="muted=!muted">Mute</button>
     <button onclick="screenshot()">📸 Screenshot</button>
   </div>
+
+  <!-- ✅ Added without breaking anything -->
+  <div class="controls" style="margin-top:6px">
+    <input id="budget" type="number" placeholder="Enter Budget ₹" />
+    <button onclick="openMustTrade()">🔥 MUST TRADE</button>
+  </div>
+
   <div style="font-size:11px;color:#94a3b8">Last refresh: <span id="time"></span></div>
 </header>
 
@@ -91,38 +90,43 @@ tr:nth-child(even) { background:#0f172a }
 const WORKER="https://red-tooth-e4f7.lovelyideas-in.workers.dev";
 const API=s=>`${WORKER}?symbol=${s}`;
 
-const TELEGRAM_BOT="8168507195:AAHXFWjfWqDZ4A4ZWnBIIsoc9wu2yp6uGmU";
-const TELEGRAM_CHAT="1652821502";
+const TELEGRAM_BOT = "8168507195:AAHXFWjfWqDZ4A4ZWnBIIsoc9wu2yp6uGmU";
+const TELEGRAM_CHAT = "1652821502";
 
 let BASE=["NIFTYBEES","TATAGOLD","TATSILV","HINDCOPPER","BSE","SAGILITY","CUPID","IDEA","BHARATCOAL","JPPOWER","HDFCBANK","SBIN","MON100","MEESHO","RVNL","ORIENTTECH","HARAFIN","RBLBANK","IRIS","GREAVESCOT","NTPCGREEN","TCS","KIMS"];
 let user=JSON.parse(localStorage.getItem("stocks")||"[]");
 let STOCKS=[...new Set([...BASE,...user])];
 
-let DB={}, filter="all", muted=false, last={}, marketMode="SIDEWAYS";
+let DB={}, filter="all", muted=false, last={};
 
 const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e}
 const RSI=a=>{let g=0,l=0;for(let i=1;i<=14;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}let rs=g/(l||1);return 100-(100/(1+rs))}
+
 function signal(e9,e21,r){ return e9>e21 && r>60 ? "BUY" : e9<e21 && r<40 ? "SELL" : "HOLD"; }
 
-function updateMarketStatus(){
- let d=DB["NIFTYBEES"];
- if(!d||d.length<30) return;
- let cl=d.map(x=>x.close);
- let e9=EMA(cl.slice(-9),9), e21=EMA(cl.slice(-21),21), r=RSI(cl.slice(-15));
+function trendEmoji(r,e9,e21){
+ if(r>55 && e9>e21) return "📈";
+ if(r<45 && e9<e21) return "📉";
+ return "〰️";
+}
 
- if(r>55 && e9>e21){marketMode="TRENDING"}
- else if(r<45 && e9<e21){marketMode="TRENDING"}
- else if(r>=45 && r<=55){marketMode="CHOPPY"}
- else{marketMode="SIDEWAYS"}
+function openMustTrade(){
+ if(!LAST_ROWS || LAST_ROWS.length===0){alert("Data loading...");return;}
+ let picks = LAST_ROWS
+   .filter(r=>r.sig!=="HOLD")
+   .map(r=>{
+     let score = r.r + Math.abs(r.e9-r.e21)*10 + r.vol/10;
+     return {...r, score};
+   })
+   .sort((a,b)=>b.score-a.score)
+   .slice(0,4);
 
- let el=document.getElementById("marketStatus");
- if(marketMode==="TRENDING"){el.innerHTML="🟢 Market Trending – Safe to trade";el.style.color="#22c55e"}
- if(marketMode==="SIDEWAYS"){el.innerHTML="🟠 Sideways Market – Trade light";el.style.color="#f59e0b"}
- if(marketMode==="CHOPPY"){el.innerHTML="🔴 Choppy Market – Avoid trading";el.style.color="#ef4444"}
+ localStorage.setItem("mustTradePicks", JSON.stringify(picks));
+ window.open("must-trade.html");
 }
 
 function sendTelegram(msg){
- if(marketMode==="CHOPPY") return; // block alerts in bad market
+ if(!TELEGRAM_BOT || !TELEGRAM_CHAT) return;
  fetch(`https://api.telegram.org/bot${TELEGRAM_BOT}/sendMessage`,{
   method:"POST",
   headers:{"Content-Type":"application/json"},
@@ -138,14 +142,19 @@ function parse(j){
  }catch{return []}
 }
 
-async function load(s){try{DB[s]=parse(await (await fetch(API(s))).json());}catch{DB[s]=[];}}
+async function load(s){
+ try{DB[s]=parse(await (await fetch(API(s))).json());}
+ catch{DB[s]=[];}
+}
 
-function addStock(){let s=newStock.value.trim().toUpperCase();if(s&&!STOCKS.includes(s)){STOCKS.push(s);localStorage.setItem("stocks",JSON.stringify(STOCKS));load(s);}newStock.value="";}
+function addStock(){
+ let s=newStock.value.trim().toUpperCase();
+ if(s&&!STOCKS.includes(s)){STOCKS.push(s);localStorage.setItem("stocks",JSON.stringify(STOCKS));load(s);}
+ newStock.value="";
+}
 
 function render(){
  time.textContent=new Date().toLocaleTimeString();
- updateMarketStatus();
-
  let q=search.value.toLowerCase(), selected=date.value, rows=[];
  for(let s of STOCKS){
   let d=DB[s]; if(!d||d.length<30)continue;
@@ -159,7 +168,8 @@ function render(){
   let sup=Math.min(...m.map(x=>x.low)),res=Math.max(...m.map(x=>x.high));
   let sig=signal(e9,e21,r);
 
-  if(marketMode==="CHOPPY" && sig!=="HOLD") continue; // protect user
+  if(filter==='buy'&&sig!=='BUY')continue;
+  if(filter==='sell'&&sig!=='SELL')continue;
 
   let entry=t.close, range=t.high-t.low;
   let sl=sig==='BUY'?entry-range*0.8:entry+range*0.8;
@@ -173,9 +183,24 @@ function render(){
   rows.push({s,entry,sl,tgt,vol,chg,t,w,m,sup,res,r,e9,e21,sig,arrow});
  }
 
- tbody.innerHTML=rows.map(r=>`
-<tr>
-<td>${r.arrow} ${r.s}</td>
+ LAST_ROWS = rows;
+
+ let srt=sort.value;
+ if(srt==="volDesc")rows.sort((a,b)=>b.vol-a.vol);
+ if(srt==="volAsc")rows.sort((a,b)=>a.vol-b.vol);
+ if(srt==="rsiDesc")rows.sort((a,b)=>b.r-a.r);
+ if(srt==="rsiAsc")rows.sort((a,b)=>a.r-b.r);
+ if(srt==="priceDesc")rows.sort((a,b)=>b.entry-a.entry);
+ if(srt==="priceAsc")rows.sort((a,b)=>a.entry-b.entry);
+ if(srt==="chgDesc")rows.sort((a,b)=>b.chg-a.chg);
+ if(srt==="chgAsc")rows.sort((a,b)=>a.chg-b.chg);
+
+ tbody.innerHTML=rows.map(r=>{
+  let cls=r.sig==="BUY"?"green":r.sig==="SELL"?"red":"";
+  let emoji = trendEmoji(r.r,r.e9,r.e21);
+
+  return `<tr>
+<td><button class="stockBtn ${cls}" onclick="openTrade('${r.s}',${r.entry.toFixed(2)},${r.sl.toFixed(2)},${r.tgt.toFixed(2)})">${r.arrow} ${r.s} ${emoji}</button></td>
 <td>${r.entry.toFixed(2)}</td>
 <td>${r.sl.toFixed(2)}</td>
 <td>${r.tgt.toFixed(2)}</td>
@@ -189,10 +214,14 @@ function render(){
 <td>${r.e9.toFixed(2)}</td>
 <td>${r.e21.toFixed(2)}</td>
 <td class="${r.sig==='BUY'?'green':r.sig==='SELL'?'red':'orange'}">${r.sig}</td>
-</tr>`).join("");
+</tr>`;
+ }).join("");
 }
 
-async function init(){for(let s of STOCKS)await load(s);render();setInterval(render,60000);}
+function screenshot(){html2canvas(document.body).then(c=>{let d=new Date();let name=d.getDate()+""+(d.getMonth()+1)+""+d.getFullYear()+"_"+d.getHours()+""+d.getMinutes()+"_STOCKS.png";let a=document.createElement("a");a.download=name;a.href=c.toDataURL();a.click();});}
+function autoScreens(){const times=["09:00","09:30","10:00","10:30","11:00","11:30","12:00","13:00","14:00","14:30","15:00","15:15","15:30"];setInterval(()=>{let now=new Date();let t=now.toTimeString().slice(0,5);if(times.includes(t)) screenshot();},60000);}
+function openTrade(s,e,sl,t){window.open(`trade.html?stock=${s}&entry=${e}&sl=${sl}&target=${t}`)}
+async function init(){for(let s of STOCKS)await load(s);render();setInterval(render,60000);autoScreens();}
 init();
 </script>
 </body>
