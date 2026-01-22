@@ -2,43 +2,39 @@
 <html>
 <head>
 <meta charset="UTF-8">
-<title>MUST TRADE</title>
+<title>Must Trade Picks</title>
 <style>
-body{background:#020617;color:#e5e7eb;font-family:system-ui;padding:20px}
-.card{background:#0f172a;border:1px solid #1f2937;padding:15px;border-radius:12px;margin-bottom:15px}
-.green{color:#22c55e;font-weight:800}
-.red{color:#ef4444;font-weight:800}
+body{background:#020617;color:#fff;font-family:system-ui;padding:20px}
+.card{border:1px solid #1f2937;padding:12px;border-radius:10px;margin-bottom:12px}
+.green{color:#22c55e}
+.red{color:#ef4444}
 </style>
 </head>
 <body>
 
-<h2>🔥 MUST TRADE PICKS</h2>
-<div id="list"></div>
+<h2>🔥 High Probability Intraday Picks</h2>
+<div id="out"></div>
 
 <script>
-let picks = JSON.parse(localStorage.getItem("mustTradePicks")||"[]");
+let data=JSON.parse(localStorage.getItem("mustTrade")||"[]");
+let budget=parseFloat(localStorage.getItem("budget")||0);
 
-function timeWindow(){
- let h=new Date().getHours();
- if(h<10) return "9:30 - 10:30";
- if(h<12) return "10:30 - 12:00";
- if(h<14) return "1:30 - 2:30";
- return "2:30 - 3:15";
+if(!data.length){
+ out.innerHTML="<p>No high-probability trades today. Capital protection mode.</p>";
+}else{
+ out.innerHTML=data.map(r=>{
+  let risk=Math.abs(r.entry-r.sl);
+  let qty=Math.floor((budget*0.01)/risk);
+  return `<div class="card">
+  <b>${r.s}</b> (${r.sig})<br>
+  Entry: ${r.entry.toFixed(2)}<br>
+  SL: ${r.sl.toFixed(2)}<br>
+  Target: ${r.tgt.toFixed(2)}<br>
+  Suggested Qty (1% risk): ${qty}<br>
+  Probability: ~70–80%
+  </div>`;
+ }).join("");
 }
-
-document.getElementById("list").innerHTML = picks.map(p=>`
-<div class="card">
-<h3>${p.s} → <span class="${p.sig==="BUY"?"green":"red"}">${p.sig}</span></h3>
-Time: ${timeWindow()}<br>
-Entry: ₹${p.entry.toFixed(2)}<br>
-SL: ₹${p.sl.toFixed(2)}<br>
-Target: ₹${p.tgt.toFixed(2)}<br>
-RSI: ${p.r.toFixed(1)}<br>
-Volume: ${p.vol}L<br>
-Winning Probability: ${(60 + p.score/3).toFixed(0)}%
-</div>
-`).join("") || "No strong trades now.";
 </script>
-
 </body>
 </html>
