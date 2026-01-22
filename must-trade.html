@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>MUST TRADE Picks</title>
+<style>
+body{background:#020617;color:white;font-family:system-ui;padding:20px}
+.card{border:1px solid #1f2937;padding:15px;border-radius:12px;margin-bottom:15px;background:#0f172a}
+.green{color:#22c55e;font-weight:800}
+.red{color:#ef4444;font-weight:800}
+</style>
+</head>
+<body>
+
+<h2>🔥 MUST TRADE PICKS</h2>
+<div id="budget"></div>
+<div id="results"></div>
+
+<script>
+const WORKER="https://red-tooth-e4f7.lovelyideas-in.workers.dev";
+const API=s=>`${WORKER}?symbol=${s}`;
+
+const STOCKS=["NIFTYBEES","TATAGOLD","TATSILV","HINDCOPPER","BSE","SAGILITY","CUPID","IDEA","BHARATCOAL","JPPOWER","HDFCBANK","SBIN","MON100","MEESHO","RVNL","ORIENTTECH","HARAFIN","RBLBANK","IRIS","GREAVESCOT","NTPCGREEN","TCS","KIMS"];
+
+const EMA=(a,p)=>{let k=2/(p+1),e=a[0];for(let v of a)e=v*k+e*(1-k);return e}
+const RSI=a=>{let g=0,l=0;for(let i=1;i<=14;i++){let d=a[i]-a[i-1];d>0?g+=d:l-=d}let rs=g/(l||1);return 100-(100/(1+rs))}
+
+async function load(symbol){
+ let j=await fetch(API(symbol)).then(r=>r.json());
+ let r=j.chart.result[0],q=r.indicators.quote[0];
+ return r.timestamp.map((t,i)=>({close:q.close[i],high:q.high[i],low:q.low[i],volume:q.volume[i]||0})).filter(x=>x.close);
+}
+
+async function run(){
+ let b=new URLSearchParams(location.search).get("budget");
+ document.getElementById("budget").innerHTML=`Budget: ₹${b}`;
+
+ let results=[];
+ for(let s of STOCKS){
+  let d=await load(s);
+  if(d.length<30)continue;
+  let cl=d.map(x=>x.close);
+  let e9=EMA(cl.slice(-9),9),e21=EMA(cl.slice(-21),21);
+  let r=RSI(cl.slice(-15));
+  let t=d.at(-1);
+  let range=t.high-t.low;
+  let sig=e9>e21 && r>60?"BUY":e9<e21 && r<40?"SELL":"HOLD";
+  if(sig==="HOLD")continue;
+
+  let score=(Math.abs(e9-e21)*100)+(r)+(t.volume/1e6);
+  results.push({s,sig,r,entry:t.close,sl:t.close-range*0.8,tgt:t.close+range*1.2,score});
+ }
+
+ results.sort((a,b)=>b.score-a.score);
+ results=results.slice(0,4);
+
+ document.getElementById("results").innerHTML=results.map(r=>`
+<div class="card">
+<h3>${r.s} → <span class="${r.sig==="BUY"?"green":"red"}">${r.sig}</span></h3>
+Entry: ₹${r.entry.toFixed(2)}<br>
+SL: ₹${r.sl.toFixed(2)}<br>
+Target: ₹${r.tgt.toFixed(2)}<br>
+RSI Strength: ${r.r.toFixed(1)}<br>
+Win Probability: ${Math.min(85,50 + (r.score/10)).toFixed(0)}%
+</div>`).join("");
+}
+
+run();
+</script>
+</body>
+</html>
