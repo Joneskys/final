@@ -32,13 +32,6 @@ tr:nth-child(even) { background:#0f172a }
   font-weight:900;font-size:14px;
 }
 .popup{position:fixed;bottom:20px;right:20px;background:#020617;border:1px solid var(--border);padding:10px;border-radius:12px;display:none}
-
-.mustTradeBox{
-  margin-top:8px;
-  display:flex;
-  gap:6px;
-  align-items:center;
-}
 </style>
 </head>
 <body>
@@ -68,9 +61,9 @@ tr:nth-child(even) { background:#0f172a }
     <button onclick="screenshot()">📸 Screenshot</button>
   </div>
 
-  <!-- ⭐ NEW FEATURE -->
-  <div class="mustTradeBox">
-    <input id="budget" placeholder="Enter Budget ₹" type="number" />
+  <!-- 🔥 MUST TRADE ADDITION -->
+  <div class="controls" style="margin-top:6px">
+    <input id="budget" type="number" placeholder="Enter budget ₹" />
     <button onclick="openMustTrade()">🔥 MUST TRADE</button>
   </div>
 
@@ -113,7 +106,16 @@ function signal(e9,e21,r){ return e9>e21 && r>60 ? "BUY" : e9<e21 && r<40 ? "SEL
 function openMustTrade(){
   let b=document.getElementById("budget").value;
   if(!b||b<=0){alert("Enter valid budget");return;}
-  window.open(`must-trade.html?budget=${b}`);
+  if(!window.LAST_ROWS || !LAST_ROWS.length){alert("Wait for data");return;}
+
+  let list=LAST_ROWS.filter(r=>r.sig!=="HOLD");
+  list.forEach(r=>{
+    r.score = Math.abs(r.e9-r.e21)*10 + r.r + (r.vol||0)/10;
+  });
+
+  list.sort((a,b)=>b.score-a.score);
+  localStorage.setItem("mustTradePicks", JSON.stringify(list.slice(0,4)));
+  window.open("must-trade.html");
 }
 
 function sendTelegram(msg){
@@ -170,18 +172,30 @@ function render(){
   let diff=(e9-e21)/e21*100;
   let arrow=diff>0.15?`<span class="green bold">↑</span>`:diff<-0.15?`<span class="red bold">↓</span>`:`<span class="orange bold">→</span>`;
 
-  rows.push({s,entry,sl,tgt,vol,chg,r,e9,e21,sig});
+  rows.push({s,entry,sl,tgt,vol,chg,t,w,m,sup,res,r,e9,e21,sig,arrow});
  }
 
- tbody.innerHTML = rows.map(r=>`
-<tr>
-<td>${r.s}</td>
+ window.LAST_ROWS = rows;
+
+ tbody.innerHTML=rows.map(r=>{
+  let cls=r.sig==="BUY"?"green":r.sig==="SELL"?"red":"";
+  return `<tr>
+<td><button class="stockBtn ${cls}">${r.arrow} ${r.s}</button></td>
 <td>${r.entry.toFixed(2)}</td>
 <td>${r.sl.toFixed(2)}</td>
 <td>${r.tgt.toFixed(2)}</td>
 <td>${r.vol}</td>
-<td colspan="9"></td>
-</tr>`).join("");
+<td style="font-size:10px">L:${r.t.low.toFixed(1)} H:${r.t.high.toFixed(1)} (${r.chg.toFixed(2)}%)</td>
+<td style="font-size:10px">L:${Math.min(...r.w.map(x=>x.low)).toFixed(1)} H:${Math.max(...r.w.map(x=>x.high)).toFixed(1)}</td>
+<td style="font-size:10px">L:${Math.min(...r.m.map(x=>x.low)).toFixed(1)} H:${Math.max(...r.m.map(x=>x.high)).toFixed(1)}</td>
+<td>${r.sup.toFixed(2)}</td>
+<td>${r.res.toFixed(2)}</td>
+<td>${r.r.toFixed(1)}</td>
+<td>${r.e9.toFixed(2)}</td>
+<td>${r.e21.toFixed(2)}</td>
+<td class="${r.sig==='BUY'?'green':r.sig==='SELL'?'red':'orange'}">${r.sig}</td>
+</tr>`;
+ }).join("");
 }
 
 async function init(){for(let s of STOCKS)await load(s);render();setInterval(render,60000);}
